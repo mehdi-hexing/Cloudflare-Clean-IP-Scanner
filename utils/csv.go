@@ -33,7 +33,7 @@ func NoPrintResult() bool {
 
 // Check if to output to file
 func noOutput() bool {
-	return Output == "" || Output == " " [cite: 2, 3]
+	return Output == "" || Output == " "
 }
 
 type PingData struct {
@@ -51,41 +51,39 @@ type CloudflareIPData struct {
 
 // Calculate packet loss rate
 func (cf *CloudflareIPData) getLossRate() float32 {
-	if cf.lossRate == 0 {
-		if cf.Sended > 0 { // جلوگیری از تقسیم بر صفر اگر Sended صفر باشد
+	if cf.lossRate == 0 { // فقط اگر قبلا محاسبه نشده باشد
+		if cf.Sended > 0 { // جلوگیری از تقسیم بر صفر
 			pingLost := cf.Sended - cf.Received
 			cf.lossRate = float32(pingLost) / float32(cf.Sended)
 		} else {
-			cf.lossRate = 1.0 // اگر هیچ پینگی ارسال نشده، پکت لاس را ۱۰۰٪ در نظر می‌گیریم
+			cf.lossRate = 1.0 // اگر پینگی ارسال نشده، پکت لاس ۱۰۰٪ است
 		}
 	}
 	return cf.lossRate
 }
 
-// این تابع برای Print() استفاده می‌شود، پس دست‌نخورده باقی می‌ماند
+// این تابع برای Print() استفاده می‌شود و دست‌نخورده باقی می‌ماند
 func (cf *CloudflareIPData) toString() []string {
 	result := make([]string, 6)
 	if cf.IP != nil {
 		result[0] = cf.IP.String()
 	} else {
-		result[0] = "N/A"
+		result[0] = "N/A" // در صورتی که IP به هر دلیلی nil باشد
 	}
 	result[1] = strconv.Itoa(cf.Sended)
 	result[2] = strconv.Itoa(cf.Received)
 	result[3] = strconv.FormatFloat(float64(cf.getLossRate()), 'f', 2, 32)
 	result[4] = strconv.FormatFloat(cf.Delay.Seconds()*1000, 'f', 2, 32)
-	result[5] = strconv.FormatFloat(cf.DownloadSpeed/1024/1024, 'f', 2, 32)
+	result[5] = strconv.FormatFloat(cf.DownloadSpeed/1024/1024, 'f', 2, 32) // تبدیل به MB/s
 	return result
 }
 
 // تابع اصلاح‌شده برای ذخیره فقط IP های تمیز، هر کدام در یک خط
 func ExportCsv(data []CloudflareIPData) {
-	if noOutput() || len(data) == 0 { [cite: 4]
+	if noOutput() || len(data) == 0 {
 		return
 	}
-	// متغیر Output نام فایل را از طریق فلگ -o دریافت می‌کند.
-	// کاربر می‌تواند نام فایلی مانند "clean_ips.txt" را تعیین کند.
-	fp, err := os.Create(Output)
+	fp, err := os.Create(Output) // Output نام فایل از فلگ -o است
 	if err != nil {
 		log.Fatalf("Failed to create file [%s]: %v", Output, err)
 		return
@@ -111,7 +109,7 @@ func ExportCsv(data []CloudflareIPData) {
 	log.Printf("Successfully wrote clean IPs (one per line) to %s", Output)
 }
 
-// این تابع برای Print() استفاده می‌شود، پس دست‌نخورده باقی می‌ماند
+// این تابع برای Print() استفاده می‌شود و دست‌نخورده باقی می‌ماند
 func convertToString(data []CloudflareIPData) [][]string {
 	result := make([][]string, 0)
 	for _, v := range data {
@@ -125,34 +123,34 @@ type PingDelaySet []CloudflareIPData
 
 // Delay condition filtering
 func (s PingDelaySet) FilterDelay() (data PingDelaySet) {
-	if InputMaxDelay > maxDelay || InputMinDelay < minDelay { [cite: 5]
+	if InputMaxDelay > maxDelay || InputMinDelay < minDelay { // When the input delay condition is not within the default range, no filtering is performed
 		return s
 	}
-	if InputMaxDelay == maxDelay && InputMinDelay == minDelay { // When the input delay condition is the default value, no filtering is performed [cite: 5]
+	if InputMaxDelay == maxDelay && InputMinDelay == minDelay { // When the input delay condition is the default value, no filtering is performed
 		return s
 	}
 	for _, v := range s {
-		if v.Delay > InputMaxDelay { // Upper limit of average delay, when the delay is greater than the maximum value of the condition, no subsequent data meets the condition, directly exit the loop [cite: 5]
+		if v.Delay > InputMaxDelay { // Upper limit of average delay, when the delay is greater than the maximum value of the condition, no subsequent data meets the condition, directly exit the loop
 			break
 		}
-		if v.Delay < InputMinDelay { // Lower limit of average delay, when the delay is less than the minimum value of the condition, it does not meet the condition, skip [cite: 5]
+		if v.Delay < InputMinDelay { // Lower limit of average delay, when the delay is less than the minimum value of the condition, it does not meet the condition, skip
 			continue
 		}
-		data = append(data, v) // When the delay meets the condition, add it to the new array [cite: 5]
+		data = append(data, v) // When the delay meets the condition, add it to the new array
 	}
 	return
 }
 
 // Packet loss condition filtering
 func (s PingDelaySet) FilterLossRate() (data PingDelaySet) {
-	if InputMaxLossRate >= maxLossRate { // When the input packet loss condition is the default value, no filtering is performed [cite: 6]
+	if InputMaxLossRate >= maxLossRate { // When the input packet loss condition is the default value, no filtering is performed
 		return s
 	}
 	for _, v := range s {
-		if v.getLossRate() > InputMaxLossRate { // Upper limit of packet loss rate [cite: 6]
+		if v.getLossRate() > InputMaxLossRate { // Upper limit of packet loss rate
 			break
 		}
-		data = append(data, v) // When the packet loss rate meets the condition, add it to the new array [cite: 6]
+		data = append(data, v) // When the packet loss rate meets the condition, add it to the new array
 	}
 	return
 }
@@ -189,17 +187,17 @@ func (s DownloadSpeedSet) Print() {
 	if NoPrintResult() {
 		return
 	}
-	if len(s) <= 0 { // When the length of the IP array (number of IPs) is 0, skip outputting results [cite: 8]
+	if len(s) <= 0 { // When the length of the IP array (number of IPs) is 0, skip outputting results
 		fmt.Println("\n[Info] The number of complete test results IP is 0, skipping output results.")
 		return
 	}
-	dateString := convertToString(s) // Convert to multi-dimensional array [][]string [cite: 8]
-	if len(dateString) < PrintNum {  // If the length of the IP array (number of IPs) is less than the printing times, change the times to the number of IPs [cite: 8]
+	dateString := convertToString(s) // Convert to multi-dimensional array [][]string
+	if len(dateString) < PrintNum {  // If the length of the IP array (number of IPs) is less than the printing times, change the times to the number of IPs
 		PrintNum = len(dateString)
 	}
 	headFormat := "%-15s%-5s%-9s%-10s%-14s%-21s\n"
 	dataFormat := "%-17s%-7s%-7s%-13s%-15s%-15s\n"
-	for i := 0; i < PrintNum; i++ { // If the IPs to be output contain IPv6, adjust the spacing [cite: 9]
+	for i := 0; i < PrintNum; i++ { // If the IPs to be output contain IPv6, adjust the spacing
 		if len(dateString[i][0]) > 15 {
 			headFormat = "%-40s%-5s%-9s%-10s%-14s%-21s\n"
 			dataFormat = "%-42s%-7s%-7s%-13s%-15s%-15s\n"
@@ -207,10 +205,11 @@ func (s DownloadSpeedSet) Print() {
 		}
 	}
 	fmt.Printf(headFormat, "IP Address", "Sent", "Received", "Loss-Rate", "Average-Delay", "Download-Speed (MB/s)")
-	for i := 0; i < PrintNum; i++ { [cite: 10]
+	for i := 0; i < PrintNum; i++ {
 		fmt.Printf(dataFormat, dateString[i][0], dateString[i][1], dateString[i][2], dateString[i][3], dateString[i][4], dateString[i][5])
 	}
-	if !noOutput() { // اگر خروجی فایل غیرفعال نشده باشد
+	if !noOutput() {
+		// پیام کنسول را کمی تغییر می‌دهیم تا منعکس کننده این باشد که فایل فقط شامل IP هاست
 		fmt.Printf("\nClean IPs (one per line) have been written to %v file.\n", Output)
 		if Output == defaultOutput { // اگر نام فایل همان result.csv پیش‌فرض است
 			fmt.Printf("Note: The file %s now contains only IP addresses, one per line, not full CSV data.\n", Output)
