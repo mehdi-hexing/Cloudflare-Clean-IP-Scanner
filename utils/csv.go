@@ -6,8 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
-	// "strconv" // <--- حذف شد، چون استفاده نمی‌شود
-	"strings"
+	"strconv"
 	"time"
 )
 
@@ -45,34 +44,27 @@ type PingData struct {
 
 type CloudflareIPData struct {
 	*PingData
-	// lossRate      float32 // <--- حذف شد، چون استفاده نمی‌شد و getLossRate آن را مقداردهی نمی‌کرد
+	lossRate      float32
 	DownloadSpeed float64
 }
 
-// Calculate packet loss rate directly.
+// Calculate packet loss rate
 func (cf *CloudflareIPData) getLossRate() float32 {
-	if cf.Sended == 0 {
-		return 1.0 // 100% loss if no packets sent, not a "clean" IP
+	if cf.lossRate == 0 {
+		pingLost := cf.Sended - cf.Received
+		cf.lossRate = float32(pingLost) / float32(cf.Sended)
 	}
-	pingLost := cf.Sended - cf.Received
-	return float32(pingLost) / float32(cf.Sended)
+	return cf.lossRate
 }
 
-// toString now returns only the IP address.
 func (cf *CloudflareIPData) toString() []string {
-	return []string{cf.IP.String()}
-}
-
-// convertToString now filters for clean IPs (0% loss, Sended > 0)
-// and uses the simplified toString method.
-func convertToString(data []CloudflareIPData) [][]string {
-	result := make([][]string, 0)
-	for _, v := range data {
-		// Filter for 0 packet loss and ensure packets were actually sent
-		if v.Sended > 0 && v.getLossRate() == 0 {
-			result = append(result, v.toString())
-		}
-	}
+	result := make([]string, 6)
+	result[0] = cf.IP.String()
+	result[1] = strconv.Itoa(cf.Sended)
+	result[2] = strconv.Itoa(cf.Received)
+	result[3] = strconv.FormatFloat(float64(cf.getLossRate()), 'f', 2, 32)
+	result[4] = strconv.FormatFloat(cf.Delay.Seconds()*1000, 'f', 2, 32)
+	result[5] = strconv.FormatFloat(cf.DownloadSpeed/1024/1024, 'f', 2, 32)
 	return result
 }
 
@@ -83,19 +75,20 @@ func ExportCsv(data []CloudflareIPData) {
 	fp, err := os.Create(Output)
 	if err != nil {
 		log.Fatalf("Failed to create file [%s]: %v", Output, err)
-		// return // Unreachable due to log.Fatalf
+		return
 	}
 	defer fp.Close()
-	w := csv.NewWriter(fp)
-	// Header changed to only "IP Address"
-	// It's good practice to check these errors, but for now, ignoring them as per previous code.
-	_ = w.Write([]string{"IP Address"})
-	// convertToString now returns only clean IPs, each as a single-element string slice.
+	w := csv.NewWriter(fp) // Create a new file writing stream
 	_ = w.WriteAll(convertToString(data))
-	err = w.Flush() // Check error from Flush
-	if err != nil {
-		log.Printf("Warning: Failed to flush CSV writer for file [%s]: %v", Output, err)
+	w.Flush()
+}
+
+func convertToString(data []CloudflareIPData) [][]string {
+	result := make([][]string, 0)
+	for _, v := range data {
+		result = append(result, v.toString())
 	}
+	return result
 }
 
 // Delay and packet loss sorting
@@ -103,34 +96,34 @@ type PingDelaySet []CloudflareIPData
 
 // Delay condition filtering
 func (s PingDelaySet) FilterDelay() (data PingDelaySet) {
-	if InputMaxDelay > maxDelay || InputMinDelay < minDelay {
+	if InputMaxDelay > maxDelay || InputMinDelay < minDelay { // When the input delay condition is not within the default range, no filtering is performed
 		return s
 	}
-	if InputMaxDelay == maxDelay && InputMinDelay == minDelay {
+	if InputMaxDelay == maxDelay && InputMinDelay == minDelay { // When the input delay condition is the default value, no filtering is performed
 		return s
 	}
 	for _, v := range s {
-		if v.Delay > InputMaxDelay {
+		if v.Delay > InputMaxDelay { // Upper limit of average delay, when the delay is greater than the maximum value of the condition, no subsequent data meets the condition, directly exit the loop
 			break
 		}
-		if v.Delay < InputMinDelay {
+		if v.Delay < InputMinDelay { // Lower limit of average delay, when the delay is less than the minimum value of the condition, it does not meet the condition, skip
 			continue
 		}
-		data = append(data, v)
+		data = append(data, v) // When the delay meets the condition, add it to the new array
 	}
 	return
 }
 
 // Packet loss condition filtering
 func (s PingDelaySet) FilterLossRate() (data PingDelaySet) {
-	if InputMaxLossRate >= maxLossRate {
+	if InputMaxLossRate >= maxLossRate { // When the input packet loss condition is the default value, no filtering is performed
 		return s
 	}
 	for _, v := range s {
-		if v.getLossRate() > InputMaxLossRate {
+		if v.getLossRate() > InputMaxLossRate { // Upper limit of packet loss rate
 			break
 		}
-		data = append(data, v)
+		data = append(data, v) // When the packet loss rate meets the condition, add it to the new array
 	}
 	return
 }
@@ -162,32 +155,32 @@ func (s DownloadSpeedSet) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-// Print function is simplified to output only clean IP addresses to the console.
 func (s DownloadSpeedSet) Print() {
 	if NoPrintResult() {
 		return
 	}
-
-	dateString := convertToString(s)
-
-	if len(dateString) == 0 {
-		fmt.Println("\n[Info] The number of clean IP test results is 0, skipping console output.")
+	if len(s) <= 0 { // When the length of the IP array (number of IPs) is 0, skip outputting results
+		fmt.Println("\n[Info] The number of complete test results IP is 0, skipping output results.")
 		return
 	}
-
-	numToPrint := PrintNum
-	if len(dateString) < PrintNum {
-		numToPrint = len(dateString)
+	dateString := convertToString(s) // Convert to multi-dimensional array [][]string
+	if len(dateString) < PrintNum {  // If the length of the IP array (number of IPs) is less than the printing times, change the times to the number of IPs
+		PrintNum = len(dateString)
 	}
-
-	fmt.Printf("\n%-40s\n", "Clean IP Addresses (Console Output):")
-	fmt.Println(strings.Repeat("-", 40))
-
-	for i := 0; i < numToPrint; i++ {
-		fmt.Printf("%-40s\n", dateString[i][0])
+	headFormat := "%-15s%-5s%-9s%-10s%-14s%-21s\n"
+	dataFormat := "%-17s%-7s%-7s%-13s%-15s%-15s\n"
+	for i := 0; i < PrintNum; i++ { // If the IPs to be output contain IPv6, adjust the spacing
+		if len(dateString[i][0]) > 15 {
+			headFormat = "%-40s%-5s%-9s%-10s%-14s%-21s\n"
+			dataFormat = "%-42s%-7s%-7s%-13s%-15s%-15s\n"
+			break
+		}
 	}
-
+	fmt.Printf(headFormat, "IP Address", "Sent", "Received", "Loss-Rate", "Average-Delay", "Download-Speed (MB/s)")
+	for i := 0; i < PrintNum; i++ {
+		fmt.Printf(dataFormat, dateString[i][0], dateString[i][1], dateString[i][2], dateString[i][3], dateString[i][4], dateString[i][5])
+	}
 	if !noOutput() {
-		fmt.Printf("\nClean IP results have been written to the %v file.\n", Output)
+		fmt.Printf("\nComplete test results have been written to %v file, which can be viewed using Notepad/Spreadsheet software.\n", Output)
 	}
 }
