@@ -50,92 +50,40 @@ type CloudflareIPData struct {
 
 // Calculate packet loss rate
 func (cf *CloudflareIPData) getLossRate() float32 {
-	if cf.Sended == 0 {
-		return 0.0
-	}
-	// Re-calculate lossRate if it's zero (or not pre-set) and Sended is positive.
-	// This assumes lossRate might be explicitly set to 0 to force recalculation,
-	// or it's the first time being accessed.
-	// If lossRate could be non-zero from an external source and shouldn't be overridden,
-	// this logic might need adjustment. For now, it prioritizes calculation if lossRate is zero.
-	if cf.lossRate == 0.0 && cf.Received == 0 && cf.Sended > 0 { // If explicitly set to 0 for recalc, or initial calc
-		pingLost := cf.Sended - cf.Received
-		cf.lossRate = float32(pingLost) / float32(cf.Sended)
-	} else if cf.Sended > 0 && (cf.Sended-cf.Received)/cf.Sended != int(cf.lossRate) {
-		// If loss rate was previously calculated but Sended/Received changed, recalculate
-		// This part is tricky: cf.lossRate is float32.
-		// A simpler way: always calculate unless it's been specifically set to a non-zero value
-		// that we want to preserve. Assuming it's always derived from Sended/Received here.
+	if cf.lossRate == 0 {
 		pingLost := cf.Sended - cf.Received
 		cf.lossRate = float32(pingLost) / float32(cf.Sended)
 	}
 	return cf.lossRate
 }
 
-// toString prepares a string slice for console output.
 func (cf *CloudflareIPData) toString() []string {
-	result := make([]string, 6)
-	if cf.IP != nil {
-		result[0] = cf.IP.String()
-	} else {
-		result[0] = "N/A"
-	}
-	result[1] = strconv.Itoa(cf.Sended)
-	result[2] = strconv.Itoa(cf.Received)
-	result[3] = fmt.Sprintf("%.2f%%", cf.getLossRate()*100)
-	result[4] = fmt.Sprintf("%dms", cf.Delay.Milliseconds())
-	result[5] = fmt.Sprintf("%.2f", cf.DownloadSpeed)
+	result := make([]string, 1)
+	result[0] = cf.IP.String()
 	return result
 }
 
-// convertToString converts a slice of CloudflareIPData to a 2D string slice for console display.
-func convertToString(data []CloudflareIPData) [][]string {
-	result := make([][]string, 0, len(data))
-	for _, v := range data {
-		result = append(result, v.toString())
-	}
-	return result
-}
-
-// convertToIPOnlyCsvData converts a slice of CloudflareIPData to a 2D string slice
-// where each inner slice contains only the IP address, for CSV export.
-func convertToIPOnlyCsvData(data []CloudflareIPData) [][]string {
-	result := make([][]string, 0, len(data))
-	for _, v := range data {
-		if v.IP != nil {
-			result = append(result, []string{v.IP.String()})
-		} else {
-			result = append(result, []string{"N/A"})
-		}
-	}
-	return result
-}
-
-// ExportCsv writes ONLY the IP addresses to the specified output file, one IP per line.
 func ExportCsv(data []CloudflareIPData) {
 	if noOutput() || len(data) == 0 {
 		return
 	}
-	fp, err := os.Create(Output) // os.Create truncates if file exists
+	fp, err := os.Create(Output)
 	if err != nil {
 		log.Fatalf("Failed to create file [%s]: %v", Output, err)
+		return
 	}
 	defer fp.Close()
-
-	w := csv.NewWriter(fp)
-
-	// NO HEADER IS WRITTEN as per user request.
-
-	csvData := convertToIPOnlyCsvData(data)
-	if err := w.WriteAll(csvData); err != nil {
-		log.Printf("Failed to write all data to CSV file [%s]: %v", Output, err)
-		// It's good to let the user know if the write failed, but `log.Fatalf` might be too harsh if some data was written.
-		// However, `WriteAll` attempts to write all records, so if it fails, it's usually a more significant issue.
-	}
+	w := csv.NewWriter(fp) // Create a new file writing stream
+	_ = w.WriteAll(convertToString(data))
 	w.Flush()
-	if err := w.Error(); err != nil { // Check for errors after flush
-		log.Printf("Error flushing CSV writer for [%s]: %v", Output, err)
+}
+
+func convertToString(data []CloudflareIPData) [][]string {
+	result := make([][]string, 0)
+	for _, v := range data {
+		result = append(result, v.toString())
 	}
+	return result
 }
 
 // Delay and packet loss sorting
@@ -143,36 +91,34 @@ type PingDelaySet []CloudflareIPData
 
 // Delay condition filtering
 func (s PingDelaySet) FilterDelay() (data PingDelaySet) {
-	if InputMaxDelay > maxDelay || InputMinDelay < minDelay {
+	if InputMaxDelay > maxDelay || InputMinDelay < minDelay { // When the input delay condition is not within the default range, no filtering is performed
 		return s
 	}
-	if InputMaxDelay == maxDelay && InputMinDelay == minDelay {
+	if InputMaxDelay == maxDelay && InputMinDelay == minDelay { // When the input delay condition is the default value, no filtering is performed
 		return s
 	}
-	data = make(PingDelaySet, 0)
 	for _, v := range s {
-		if v.Delay > InputMaxDelay {
-			continue // If not sorted by delay, must check all.
+		if v.Delay > InputMaxDelay { // Upper limit of average delay, when the delay is greater than the maximum value of the condition, no subsequent data meets the condition, directly exit the loop
+			break
 		}
-		if v.Delay < InputMinDelay {
+		if v.Delay < InputMinDelay { // Lower limit of average delay, when the delay is less than the minimum value of the condition, it does not meet the condition, skip
 			continue
 		}
-		data = append(data, v)
+		data = append(data, v) // When the delay meets the condition, add it to the new array
 	}
 	return
 }
 
 // Packet loss condition filtering
 func (s PingDelaySet) FilterLossRate() (data PingDelaySet) {
-	if InputMaxLossRate >= maxLossRate {
+	if InputMaxLossRate >= maxLossRate { // When the input packet loss condition is the default value, no filtering is performed
 		return s
 	}
-	data = make(PingDelaySet, 0)
 	for _, v := range s {
-		if v.getLossRate() > InputMaxLossRate { // Assumes PingDelaySet is sorted by loss rate first
+		if v.getLossRate() > InputMaxLossRate { // Upper limit of packet loss rate
 			break
 		}
-		data = append(data, v)
+		data = append(data, v) // When the packet loss rate meets the condition, add it to the new array
 	}
 	return
 }
@@ -208,61 +154,28 @@ func (s DownloadSpeedSet) Print() {
 	if NoPrintResult() {
 		return
 	}
-	if len(s) <= 0 {
+	if len(s) <= 0 { // When the length of the IP array (number of IPs) is 0, skip outputting results
 		fmt.Println("\n[Info] The number of complete test results IP is 0, skipping output results.")
 		return
 	}
-
-	dateString := convertToString(s)
-	displayCount := PrintNum
-	if len(dateString) < PrintNum {
-		displayCount = len(dateString)
+	dateString := convertToString(s) // Convert to multi-dimensional array [][]string
+	if len(dateString) < PrintNum {  // If the length of the IP array (number of IPs) is less than the printing times, change the times to the number of IPs
+		PrintNum = len(dateString)
 	}
-	
-	if displayCount == 0 && len(s) > 0 {
-		// This case implies PrintNum was 0, which should have been caught by NoPrintResult().
-		// Or, PrintNum is > 0 but len(dateString) is 0, caught by len(s) <= 0.
-		// So, if displayCount is 0 here, it means no results to print or printing is disabled.
-		// The len(s) check above handles "no results". NoPrintResult() handles "printing disabled".
-		return
-	}
-
-
-	headFormat := "%-15s%-8s%-9s%-10s%-14s%-21s\n"
-	dataFormat := "%-17s%-8s%-9s%-13s%-15s%-15s\n"
-
-	isIPv6Present := false
-	if displayCount > 0 {
-		for i := 0; i < displayCount; i++ {
-			// Ensure dateString[i] exists and has at least one element before checking its length
-			if len(dateString[i]) > 0 && len(dateString[i][0]) > 15 {
-				isIPv6Present = true
-				break
-			}
+	headFormat := "%-15s%-5s%-9s%-10s%-14s%-21s\n"
+	dataFormat := "%-17s%-7s%-7s%-13s%-15s%-15s\n"
+	for i := 0; i < PrintNum; i++ { // If the IPs to be output contain IPv6, adjust the spacing
+		if len(dateString[i][0]) > 15 {
+			headFormat = "%-40s%-5s%-9s%-10s%-14s%-21s\n"
+			dataFormat = "%-42s%-7s%-7s%-13s%-15s%-15s\n"
+			break
 		}
 	}
-
-	if isIPv6Present {
-		headFormat = "%-40s%-8s%-9s%-10s%-14s%-21s\n"
-		dataFormat = "%-42s%-8s%-9s%-13s%-15s%-15s\n"
+	fmt.Printf(headFormat, "IP Address", "Sent", "Received", "Loss-Rate", "Average-Delay", "Download-Speed (MB/s)")
+	for i := 0; i < PrintNum; i++ {
+		fmt.Printf(dataFormat, dateString[i][0], dateString[i][1], dateString[i][2], dateString[i][3], dateString[i][4], dateString[i][5])
 	}
-
-	fmt.Printf(headFormat, "IP Address", "Sent", "Received", "Loss-Rate", "Avg-Delay", "Download-Speed (MB/s)")
-	for i := 0; i < displayCount; i++ {
-		if len(dateString[i]) == 6 {
-			fmt.Printf(dataFormat, dateString[i][0], dateString[i][1], dateString[i][2], dateString[i][3], dateString[i][4], dateString[i][5])
-		} else {
-			// This should ideally not happen if data is consistent
-			if len(dateString[i]) > 0 {
-				log.Printf("[Error] Malformed data string for IP (expected 6 fields): %s", dateString[i][0])
-			} else {
-				log.Printf("[Error] Malformed data string: empty record at index %d", i)
-			}
-		}
-	}
-
 	if !noOutput() {
-		// Updated message to accurately reflect that only a list of IPs is saved.
-		fmt.Printf("\n[Info] A list of tested IP addresses has been written to the %v file (one IP per line).\n", Output)
+		fmt.Printf("\nComplete test results have been written to %v file, which can be viewed using Notepad/Spreadsheet software.\n", Output)
 	}
 }
