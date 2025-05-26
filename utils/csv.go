@@ -65,7 +65,7 @@ func convertToString(data []CloudflareIPData) [][]string {
  return result
 }
 
-func () print() [
+func (s CloudflareIPData) print() [
  if NoPrintResult() {
   return
  }
