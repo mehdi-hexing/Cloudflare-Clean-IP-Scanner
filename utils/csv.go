@@ -35,10 +35,9 @@ type PingData struct {
 	Delay time.Duration
 }
 
-// Add CloudflareIPData type definition
 type CloudflareIPData struct {
 	IP *net.IPAddr
-	// Add other fields as needed
+	// Add other fields here if needed
 }
 
 func (cf *CloudflareIPData) toString() []string {
@@ -57,7 +56,7 @@ func ExportCsv(data []CloudflareIPData) {
 		return
 	}
 	defer fp.Close()
-	w := csv.NewWriter(fp) // Create a new file writing stream
+	w := csv.NewWriter(fp)
 	_ = w.WriteAll(convertToString(data))
 	w.Flush()
 }
@@ -70,32 +69,23 @@ func convertToString(data []CloudflareIPData) [][]string {
 	return result
 }
 
-func print(s []CloudflareIPData) {
+func printResults(s []CloudflareIPData) {
 	if NoPrintResult() {
 		return
 	}
-	if len(s) <= 0 { // When the length of the IP array (number of IPs) is 0, skip outputting results
-		fmt.Println("\n[Info] The number of complete test results IP is 0, skipping output results.")
+	if len(s) == 0 {
+		fmt.Println("\n[Info] The number of complete test result IPs is 0, skipping output.")
 		return
 	}
-	dateString := convertToString(s) // Convert to multi-dimensional array [][]string
-	if len(dateString) < PrintNum {  // If the length of the IP array (number of IPs) is less than the printing times, change the times to the number of IPs
+	dateString := convertToString(s)
+	if len(dateString) < PrintNum {
 		PrintNum = len(dateString)
 	}
-	headFormat := "%-15s%-5s%-9s%-10s%-14s%-21s\n"
-	dataFormat := "%-17s%-7s%-7s%-13s%-15s%-15s\n"
-	for i := 0; i < PrintNum; i++ { // If the IPs to be output contain IPv6, adjust the spacing
-		if len(dateString[i][0]) > 15 {
-			headFormat = "%-40s%-5s%-9s%-10s%-14s%-21s\n"
-			dataFormat = "%-42s%-7s%-7s%-13s%-15s%-15s\n"
-			break
-		}
-	}
-	fmt.Printf(headFormat, "IP Address")
+	fmt.Printf("%-20s\n", "IP Address")
 	for i := 0; i < PrintNum; i++ {
-		fmt.Printf(dataFormat, dateString[i][0])
+		fmt.Printf("%-20s\n", dateString[i][0])
 	}
 	if !noOutput() {
-		fmt.Printf("\nComplete test results have been written to %v file, which can be viewed using Notepad/Spreadsheet software.\n", Output)
+		fmt.Printf("\nComplete test results have been written to %v file.\n", Output)
 	}
 }
